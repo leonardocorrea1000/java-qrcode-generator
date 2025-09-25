@@ -1,11 +1,13 @@
 package com.correa.qrcode_generator.infra;
 
 import java.io.ByteArrayInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
@@ -15,29 +17,39 @@ import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 
-@Component
+@Component("googleCloudStorageAdapter")
+@ConditionalOnProperty(name = "gcs.enabled", havingValue = "true", matchIfMissing = true)
 public class GoogleCloudStorageAdapter implements StorageInterface {
 
-    private String bucketName;
+    private final String bucketName;
     private final Storage storage;
 
     public GoogleCloudStorageAdapter(
             @Value("${gcs.bucket-name}") String bucketName,
-            @Value("${gcs.credentials-path}") String credentialsPath) {
-        try {
-            this.bucketName = bucketName;
-            StorageOptions.Builder builder = StorageOptions.newBuilder();
+            @Value("${gcs.project-id}") String projectId,
+            @Value("${gcs.credentials-path}") String credentialsPath) throws IOException {
+        this.bucketName = bucketName;
+        this.storage = buildStorageService(projectId, credentialsPath);
+    }
 
-            if (!credentialsPath.isEmpty()) {
-                ClassPathResource resource = new ClassPathResource(credentialsPath);
-                try (InputStream serviceAccount = resource.getInputStream()) {
+    GoogleCloudStorageAdapter(String bucketName, Storage storage) {
+        this.bucketName = bucketName;
+        this.storage = storage;
+    }
+
+    private Storage buildStorageService(String projectId, String credentialsPath) throws IOException {
+        try {
+            StorageOptions.Builder builder = StorageOptions.newBuilder().setProjectId(projectId);
+
+            if (credentialsPath != null && !credentialsPath.isEmpty()) {
+                try (InputStream serviceAccount = new FileInputStream(credentialsPath)) {
                     GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
                     builder.setCredentials(credentials);
                 }
             }
-            this.storage = builder.build().getService();
+            return builder.build().getService();
         } catch (IOException e) {
-            throw new RuntimeException("Failed to initialize Google Cloud Storage", e);
+            throw new IOException("Failed to initialize Google Cloud Storage. Check credentials path and permissions.", e);
         }
     }
 
